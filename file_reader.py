@@ -1,10 +1,6 @@
-import csv
+from collections import namedtuple
 
-try:
-    import thread
-    import threading
-except ImportError:
-    thread = None
+import csv
 
 
 class FileReaderException(Exception):
@@ -24,41 +20,50 @@ class FileReader(object):
 
         if self.has_header:
             self._reader = csv.reader(self._fh)
-            self.header = self._reader.next()
-
-        self.current_row = []
-
-        if thread:
-            self.lock = threading.RLock()
+            self._namedtuple = namedtuple(
+                'FileReaderRow',
+                self._reader.next()
+            )
         else:
-            self.lock = None
+            self._namedtuple = None
 
-    def _acquire_lock(self):
-        if self.lock:
-            self.lock.acquire()
+        self.current_row = None
 
-    def _release_lock(self):
-        if self.lock:
-            self.lock.release()
+    def __iter__(self):
+        return self
+
+    def next(self):
+        return self.get_next_row()
+
+    @property
+    def header(self):
+        if not self.has_header:
+            raise NoHeaderException()
+
+        return self._namedtuple._fields
 
     def get_next_row(self):
-        self._acquire_lock()
         try:
-            self.current_row = self._reader.next()
-            return self.current_row
+            new_row = self._reader.next()
         except StopIteration:
             return None
-        finally:
-            self._release_lock()
+
+        if self._namedtuple is None:
+            self.current_row = tuple(new_row)
+        else:
+            self.current_row = self._namedtuple(*new_row)
+
+        return self.current_row
 
     def get_next_dict(self):
-        self.get_next_row()
-        return self.row_as_dict()
+        if not self.has_header:
+            raise NoHeaderException()
+        return self.get_next_row()._asdict()
 
     def row_as_dict(self):
         if not self.has_header:
             raise NoHeaderException()
-        return dict(zip(self.header, self.current_row))
+        return self.current_row._asdict()
 
     def rows(self):
         while self.get_next_row() is not None:
